@@ -1,287 +1,352 @@
-
 let canvas = document.getElementById( 'the-canvas' );
 /** @type {WebGLRenderingContext} */
 let gl = canvas.getContext( 'webgl2' );
 
-let vertex_source = 
+const GOURAUD_VERTEX_SHADER = 
 `   #version 300 es
-precision mediump float;
+    precision mediump float;
 
-uniform mat4 modelview;
-uniform vec3 camera_pos;
+    uniform mat4 projection;
+    uniform mat4 modelview;
+    uniform mat4 model;
+    uniform mat4 view;
+    uniform vec3 viewer_loc;
 
-in vec3 coordinates;
-in vec3 normalized_vec;
-in vec2 uv;
+    uniform vec3 sun_dir;
+    uniform vec3 sun_color;
+    
+    uniform vec3 light1_loc;
+    uniform vec3 light1_color;
 
-out vec3 v_normalized_vec;
-out vec2 v_uv;
-out vec4 v_position;
-out vec3 v_camera_pos;
+    const float light_attenuation_k = 0.01;
+    const float light_attenuation_l = 0.1;
+    const float light_attenuation_q = 0.00; /* no quadratic term for now */
 
+    uniform float mat_ambient;
+    uniform float mat_diffuse;
+    uniform float mat_specular;
+    uniform float mat_shininess;
 
-void main( void ) {
-    v_camera_pos = normalize(camera_pos);
-    v_position = modelview * vec4( coordinates, 1.0 );
-    gl_Position = v_position;
-    v_normalized_vec = normalized_vec;
-    v_uv = uv;
-}
+    in vec3 coordinates;
+    in vec4 color;
+    in vec2 uv;
+    in vec3 surf_normal;
+
+    out vec4 v_color;
+    out vec2 v_uv;
+
+    vec3 diff_color( 
+        vec3 normal, 
+        vec3 light_dir,
+        vec3 light_color, 
+        float mat_diffuse 
+    ) {
+        return mat_diffuse * light_color * max( dot( normal, light_dir ), 0.0 );
+    }
+
+    vec3 spec_color( 
+        vec3 normal, 
+        vec3 light_dir,
+        vec3 eye_dir, 
+        vec3 light_color, 
+        float mat_specular,
+        float mat_shiniess
+    ) {
+        float cos_light_surf_normal = dot( normal, light_dir );
+
+        if( cos_light_surf_normal <= 0.0 ) {
+            return vec3( 0.0, 0.0, 0.0 );
+        }
+
+        vec3 light_reflection = 
+            2.0 * cos_light_surf_normal * normal - light_dir;
+
+        return 
+            pow( 
+                max( dot( light_reflection, normalize( eye_dir ) ), 0.0  ),
+                mat_shininess 
+            ) * light_color * mat_specular;
+    }
+
+    float attenuation( vec3 vector_to_light ) {
+        float light1_dist = length( vector_to_light );
+        float light1_atten = 1.0 / ( 
+            light_attenuation_k + 
+            light_attenuation_l * light1_dist +
+            light_attenuation_q * light1_dist * light1_dist
+        );
+
+        return light1_atten;
+    }
+
+    void main( void ) {
+        vec3 normal_tx = normalize( mat3( model ) * surf_normal );
+        vec3 coords_tx = ( model * vec4( coordinates, 1.0 ) ).xyz;
+
+        gl_Position = projection * modelview * vec4( coordinates, 1.0 );
+        vec3 eye_dir = normalize( viewer_loc - coords_tx );
+
+        vec4 ambient_color = vec4( mat_ambient, mat_ambient, mat_ambient, 1.0 );
+
+        // vec3 sun_dir_tx = 
+        float cos_sun_dir_surf_normal = dot( sun_dir, normal_tx );
+        vec3 sun_diffuse_color = diff_color( normal_tx, sun_dir, sun_color, mat_diffuse );
+        
+        vec3 sun_spec_color =
+            spec_color( normal_tx, sun_dir, eye_dir, sun_color, mat_specular, mat_shininess );
+
+        vec4 color_from_sun = vec4( sun_diffuse_color + sun_spec_color, 1.0 );
+
+        vec3 vector_to_light1 = light1_loc - coords_tx;
+        vec3 light1_dir = normalize( vector_to_light1 );
+        float light1_atten = attenuation( vector_to_light1 );
+    
+        vec3 light1_diffuse_color = diff_color( 
+            normal_tx, light1_dir, light1_color, mat_diffuse);
+        vec3 light1_spec_color = spec_color( 
+            normal_tx, light1_dir, eye_dir, light1_color, mat_specular, mat_shininess );
+        vec4 color_from_light1 = vec4(
+                ( light1_diffuse_color + light1_spec_color ) * light1_atten, 1.0 );
+
+        /* multiply color by 0 to remove it. try changing the 0 to a small number like .2
+        and the 1 to the complement of that number (1 - .2 = .8) to see how color blending works.*/
+        v_color = 
+            ( 0.0 * color ) + 
+            ( 1.0 * (
+                ambient_color +
+                color_from_sun +
+                color_from_light1
+            ) );
+        v_uv = uv;
+    }
 `;
 
-let fragment_source = 
+const GOURAUD_FRAGMENT_SHADER = 
 `   #version 300 es
-precision mediump float;
+    precision mediump float;
 
-uniform sampler2D tex_0;
-uniform float ambiant_factor;
-uniform float diffuse_factor;
-uniform float shininess; 
-uniform float specular_factor;
+    in vec4 v_color;
+    in vec2 v_uv;
 
-in vec3 v_normalized_vec;
-in vec2 v_uv;
-in vec3 v_camera_pos;
+    out vec4 f_color;
 
-out vec4 f_color;
+    uniform sampler2D tex_0;
 
-void main(void) {
-    // Lights: two lights one point and one directional
-    vec3 sun = vec3(0.0, 0.0, -1.0);
+    void main( void ) {
+        f_color = v_color * texture( tex_0, v_uv ); 
 
-    vec3 point_light_cord = vec3(0.0, -4.0, 0.0);
-    vec3 point_light_dir = normalize(point_light_cord);
-    float point_light_dist = distance(point_light_cord, gl_FragCoord.xyz);
-    float point_light_attinutation = (1.0 / (point_light_dist * point_light_dist))+.6;
-
-    // diffuse
-    float directional_light_delta = max(dot(sun, v_normalized_vec),0.0);
-    float point_light_delta = max(dot(point_light_dir, v_normalized_vec),0.0);
-
-    vec4 directional_light = vec4(1.0 * directional_light_delta, 1.0 * directional_light_delta, 1.0 * directional_light_delta, 1.0);
-    vec4 point_light = vec4(1.0 * point_light_delta, 0.0, 0.0, 1.0)*point_light_attinutation;
-
-    vec4 diffuse = (directional_light + point_light) * diffuse_factor;
-
-    // ambiant
-    vec4 ambiant = vec4(ambiant_factor, ambiant_factor, ambiant_factor, 1.0);
-
-    // Specular lighting
-    vec3 view_dir = normalize(v_camera_pos);
-    vec3 reflection_directional = reflect(-sun, v_normalized_vec);
-    vec3 reflection_point = reflect(-point_light_dir, v_normalized_vec);
-    float spec_directional_light = pow(max(dot(reflection_directional, view_dir), 0.0), shininess);
-    float spec_point_light = pow(max(dot(reflection_point, view_dir), 0.0), shininess);
-    vec4 Specular = specular_factor * (spec_directional_light + spec_point_light) * vec4(1.0, 1.0, 1.0, 1.0);
-
-    // Final calculations
-    vec4 finalColor = (ambiant + diffuse + Specular) * texture(tex_0, v_uv);
-    f_color = clamp(finalColor, 0.0, 1.0);
-}
-
-`
-
-function xor_texture() {
-    let data = new Array( 256 * 256 * 4 );
-    let width = 256;
-    for( let row = 0; row < width; row++ ) {
-        for( let col = 0; col < width; col++ ) {
-            let pix = ( row * width + col ) * 4; // [does this make sense?
-            data[pix] = data[pix + 1] = data[pix + 2] = row ^ col;
-            data[pix + 3] = 255; // alpha always max (fully opaque)
-        }
+        /* we can test depth values with this.
+        f_color = vec4(vec3(gl_FragCoord.z), 1.0); */
     }
-    let r =  new Uint8Array( data );
-    console.log(r);
-    return r;
-}
+`;
 
+let lit_program = 
+    create_compile_and_link_program( 
+        gl, 
+        /*PHONG_VERTEX_SHADER,*/ GOURAUD_VERTEX_SHADER,
+        /*PHONG_FRAGMENT_SHADER,*/ GOURAUD_FRAGMENT_SHADER
+    );
 
-
-let tex = gl.createTexture();
-const image = new Image();
-image.src = "rocky-mountain-texture-seamless.jpg";
-image.onload = function () {
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-  gl.generateMipmap( gl.TEXTURE_2D );
-};
-
-let tex2 = gl.createTexture();
-const image2 = new Image();
-image2.src = 'grass_lawn_seamless.png';
-image2.onload = function () {
-  gl.bindTexture(gl.TEXTURE_2D, tex2);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image2);
-  gl.generateMipmap( gl.TEXTURE_2D );
-};
-
-let shader_program = 
-create_compile_and_link_program( gl, vertex_source, fragment_source );
-gl.useProgram( shader_program );
-
-
-const AMBIANT_FACTOR = 0.25;
-const DIFFUSE_FACTOR = 1.0;
-const SPECULAR_FACTOR = 2.0;
-const SHININESS = 4.0;
-set_uniform_scalar(gl, shader_program, "ambiant_factor", AMBIANT_FACTOR);
-set_uniform_scalar(gl, shader_program, "diffuse_factor", DIFFUSE_FACTOR);
-set_uniform_scalar(gl, shader_program, "specular_factor", SPECULAR_FACTOR);
-set_uniform_scalar(gl, shader_program, "shininess", SHININESS);
-
+gl.useProgram( lit_program );
 
 set_render_params( gl );
 
 let last_update = performance.now();
+
 const DESIRED_TICK_RATE = 60;
 const DESIRED_MSPT = 1000.0 / DESIRED_TICK_RATE;
 
-const ROTATION_SPEED = 0.125; // eighth turn per second
+const ROTATION_SPEED = 0.2; // eighth turn per second
 const ROTATION_SPEED_PER_FRAME = ROTATION_SPEED / DESIRED_TICK_RATE;
 
-const FLY_SPEED = 1;    // units per second
+const FLY_SPEED = 2.5;    // units per second
 const FLY_SPEED_PER_FRAME = FLY_SPEED / DESIRED_TICK_RATE;
 
 let keys = Keys.start_listening();
 let cam = new Camera();
-cam.translate( 0, 0, -3 );
+cam.translate( 0, 0, -10 );
 
-// let mesh = Mesh.box( gl, shader_program, 3, 3, 1 );
-let projection = Mat4.perspective_fovx( 0.25, canvas.width / canvas.height, 0.25, 64 );
-let sphere = Mesh.make_uv_sphere(gl, shader_program, 16, 1);
 
-let the_mesh = null;
-console.log("before function");
-Mesh.from_obj_file(gl, "box.obj", shader_program, mesh_callback);
-console.log("after function");
+let rock_texture = 
+    new LitMaterial( gl, 'rock.jpg', gl.LINEAR, 0.25, 1, 2, 5 );
+let grass_texture = 
+    new LitMaterial( gl, 'grass.png', gl.LINEAR, 0.2, 0.8, 0.05, 1.0 );
+let scale = 
+    new LitMaterial( gl, 'metal_scale.png', gl.LINEAR, 0.25, 1, 2, 4 );
 
-function mesh_callback(loaded_mesh){
-    console.log(loaded_mesh);
-    the_mesh = loaded_mesh;
+let sun_dir = ( new Vec4( 0.0, 0.0, -1.0, 0.0 ) ).norm();
+let sun = new Light( sun_dir.x, sun_dir.y, sun_dir.z, 1.0, 0.95, 0.85, 0 );
+let light1 = new Light( -9, -9, 0.0, 1.0, 0.2, 0.2, 1 );
+
+let rock = NormalMesh.uv_sphere( gl, lit_program, 1, 16, rock_texture ); 
+let ground = NormalMesh.box( gl, lit_program, 1, 1, 1, grass_texture );
+let tank_body = NormalMesh.box( gl, lit_program, 1, 1, 1, scale );
+
+
+let projection = Mat4.perspective_fovx( 0.125, canvas.width / canvas.height, 0.125, 1024 );
+let current_program = lit_program;
+
+
+function set_and_bind(model){
+    let view = cam.get_view_matrix();
+    let modelview = view.mul( model );
+    
+    set_uniform_matrix4( gl, current_program, 'projection', projection.data );
+    set_uniform_matrix4( gl, current_program, 'modelview', modelview.data );
+    set_uniform_matrix4( gl, current_program, 'model', model.data );
+    set_uniform_matrix4( gl, current_program, 'view', view.data );
+
+    // transform viewer coordinates
+    // let viewer_loc = cam.get_transformed_coordinates();
+    set_uniform_vec3( gl, current_program, 'viewer_loc', cam.x, cam.y, cam.z );
+
+    // bind lights
+    sun.bind( gl, current_program, modelview );
+    light1.bind( gl, current_program, modelview );
+
 }
 
-function render_long_rock(x, y, size){
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    let model = Mat4.identity();
-    let translation = Mat4.translation(x, y, 0);
-    let scale = Mat4.scale(2*size, 1.2*size, 1*size);
-    model = model.mul( projection );
-    model = model.mul( cam.get_view_matrix() );
-    model = model.mul(translation);
-    model = model.mul(scale);
-
-    set_uniform_matrix4( 
-        gl, shader_program, "modelview", model.data );
-
-    set_uniform_vec3( 
-        gl, shader_program, "camera_pos", cam.x, cam.y, cam.z);
-
-    sphere.render(gl);
+const SPHERE_SCALE_Z = 1; // maybe this should vary too
+const SPHERE_TRANSLATION_Z = 0;
+function render_sphere(x, y, size_x, size_y, roation_turns){
+    // we're using world-space lighting, so it's okay to combine projection 
+    // and model-view like this.
+    let scale_matrix = Mat4.scale(size_x, size_y, SPHERE_SCALE_Z);
+    let rotation_matrix = Mat4.rotation_xy(roation_turns);
+    let translation_matrix = Mat4.translation(x, y, SPHERE_TRANSLATION_Z );
+    let model = translation_matrix.mul(rotation_matrix.mul(scale_matrix));
+    set_and_bind(model);
+    rock.render( gl );
 }
 
-function render_round_rock(x, y, size){
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    let model = Mat4.identity();
-    let translation = Mat4.translation(x, y, 0);
-    let scale = Mat4.scale(size, size, size);
-    model = model.mul( projection );
-    model = model.mul( cam.get_view_matrix() );
-    model = model.mul(translation);
-    model = model.mul(scale);
-
-    set_uniform_matrix4( 
-        gl, shader_program, "modelview", model.data );
-
-    set_uniform_vec3( 
-        gl, shader_program, "camera_pos", cam.x, cam.y, cam.z);
-
-    sphere.render(gl);
+const GROUND_SCALE_XY = 2; // x, y
+const GROUND_SCALE_Z = 1; // z
+const GROUND_TRANSLATION_Z = 0;
+function render_ground(x, y){
+    let scale_matrix = Mat4.scale(GROUND_SCALE_XY, GROUND_SCALE_XY, GROUND_SCALE_Z);
+    let rotation_matrix = Mat4.rotation_xy(0.0);
+    let translation_matrix = Mat4.translation(x, y, GROUND_TRANSLATION_Z );
+    let model = translation_matrix.mul(rotation_matrix.mul(scale_matrix));
+    set_and_bind(model);
+    ground.render( gl );
 }
 
-function render_ground(x, y, size){
-    gl.bindTexture(gl.TEXTURE_2D, tex2);
-    let model = Mat4.identity();
-    let translation = Mat4.translation(x, y, 1);
-    let scale = Mat4.scale(size*2, size*2, size);
-    model = model.mul( projection );
-    model = model.mul( cam.get_view_matrix() );
-    model = model.mul(translation);
-    model = model.mul(scale);
-
-    set_uniform_matrix4( 
-        gl, shader_program, "modelview", model.data );
-
-    set_uniform_vec3( 
-        gl, shader_program, "camera_pos", cam.x, cam.y, cam.z);
-
-    the_mesh.render(gl);
+const TANK_SCALE_X = .2;
+const TNAK_SCALE_Y = .25;
+const TANK_SCALE_Z = 1;
+const TANK_TRANSLATION_Z = -.12;
+function render_tank_body(x, y){
+    let scale_matrix = Mat4.scale(TANK_SCALE_X, TNAK_SCALE_Y, TANK_SCALE_Z);
+    let rotation_matrix = Mat4.rotation_xy(0.0);
+    let translation_matrix = Mat4.translation(x, y, TANK_TRANSLATION_Z );
+    let model = translation_matrix.mul(rotation_matrix.mul(scale_matrix));
+    set_and_bind(model);
+    tank_body.render( gl );
 }
+
+const BARREL_SCALE_X = .05;
+const BARREL_SCALE_Y = .3;
+const BARREL_SCALE_Z = 1;
+const BARREL_TRANSLATION_Z = -.12;
+function redner_tank_barrel(x, y, rotation_deg){
+    let scale_matrix = Mat4.scale(BARREL_SCALE_X, BARREL_SCALE_Y, BARREL_SCALE_Z);
+
+    // var angle_rad = rotation_deg * Math.PI / 180;
+
+    let rotation_matrix = Mat4.rotation_xy(convertDegreesToNormalizedValue(-rotation_deg));
+    let translation_matrix = Mat4.translation(x, y, BARREL_TRANSLATION_Z);
+    let model = translation_matrix.mul(rotation_matrix.mul(scale_matrix));
+    set_and_bind(model);
+    tank_body.render( gl );
+}
+
+
+function convertDegreesToNormalizedValue(degrees) {
+    // Ensure that degrees is within the range [0, 359]
+    degrees = (degrees % 360 + 360) % 360;
+
+    // Normalize degrees to the range [0, 1]
+    return degrees / 360;
+}
+
+function rotatePoint(x, y, originX, originY, angle) {
+    // Convert the angle to radians
+    var angleRad = angle * Math.PI / 180;
+
+    // Calculate the new coordinates after rotation
+    var newX = Math.cos(angleRad) * (x - originX) - Math.sin(angleRad) * (y - originY) + originX;
+    var newY = Math.sin(angleRad) * (x - originX) + Math.cos(angleRad) * (y - originY) + originY;
+
+    // Return the rotated coordinates
+    return { x: newX, y: newY };
+}
+
+
+let main_tank_x = 0;
+let main_tank_y = 0;
+let barrel_rotation = 0;
 
 function render( now ) {
-last_update = now;
-    gl.clear( gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT );
-
-    render_round_rock(1, 1, 1);
-    render_long_rock(1, 3, 1.3);
-    render_long_rock(-2, 0, .7);
-    if (the_mesh != null){
-        render_ground(0, 0, 1);
-        render_ground(0, 4, 1);
-        render_ground(0, -4, 1);
-        render_ground(4, 0, 1);
-        render_ground(4, 4, 1);
-        render_ground(4, -4, 1);
-        render_ground(-4, 0, 1);
-        render_ground(-4, 4, 1);
-        render_ground(-4, -4, 1);
-    }
+    last_update = now;
 
     requestAnimationFrame( render );
+    
+    gl.clear( gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT );
+
+    render_sphere(1, 1, 1, 1, 0.0);
+    render_sphere(-1, -1, 2, 1, 0.0);
+    render_ground(0, 0);
+    render_ground(2, 0);
+    render_ground(-2, 0);
+    render_ground(0, 2);
+    render_ground(-2, 2);
+    render_ground(2, 2);
+    render_ground(0, -2);
+    render_ground(-2, -2);
+    render_ground(2, -2);
+    main_tank_x = cam.x;
+    main_tank_y = cam.y;
+    if (barrel_rotation >= 360){
+        barrel_rotation = 0;
+    }
+    render_tank_body(main_tank_x, main_tank_y);
+
+    var point = rotatePoint(main_tank_x, main_tank_y+(BARREL_SCALE_Y/2), main_tank_x, main_tank_y, barrel_rotation);
+    console.log(point.x, point.y);
+
+    redner_tank_barrel( main_tank_x + (point.x - main_tank_x), main_tank_y + (point.y - main_tank_y), barrel_rotation);
 }
 
 const KEYMAP = {
-    'KeyW': function() { cam.move_in_direction( 0, 0, FLY_SPEED_PER_FRAME ); },
-    'KeyS': function() { cam.move_in_direction( 0, 0, -FLY_SPEED_PER_FRAME ); },
+    // 'KeyW': function() { cam.move_in_direction( 0, 0, FLY_SPEED_PER_FRAME ); },
+    // 'KeyS': function() { cam.move_in_direction( 0, 0, -FLY_SPEED_PER_FRAME ); },
     'KeyA': function() { cam.move_in_direction( -FLY_SPEED_PER_FRAME, 0, 0 ); },
     'KeyD': function() { cam.move_in_direction( FLY_SPEED_PER_FRAME, 0, 0 ); },
-    'Space': function() { cam.translate( 0, FLY_SPEED_PER_FRAME, 0 ); },
-    'KeyC': function() { cam.translate( 0, -FLY_SPEED_PER_FRAME, 0 ); },
-    'KeyQ': function() { cam.add_roll( -ROTATION_SPEED_PER_FRAME ); },
-    'KeyE': function() { cam.add_roll( ROTATION_SPEED_PER_FRAME ); },
-    'ArrowLeft': function() { cam.add_yaw( -ROTATION_SPEED_PER_FRAME ); },
-    'ArrowRight': function() { cam.add_yaw( ROTATION_SPEED_PER_FRAME ); },
-    'ArrowUp': function() { cam.add_pitch( -ROTATION_SPEED_PER_FRAME ); },
-    'ArrowDown': function() { cam.add_pitch( ROTATION_SPEED_PER_FRAME ); },
+    'KeyW': function() { cam.translate( 0, FLY_SPEED_PER_FRAME, 0 ); },
+    'KeyS': function() { cam.translate( 0, -FLY_SPEED_PER_FRAME, 0 ); },
+    // 'Space': function() { cam.translate( 0, FLY_SPEED_PER_FRAME, 0 ); },
+    // 'KeyC': function() { cam.translate( 0, -FLY_SPEED_PER_FRAME, 0 ); },
+    // 'KeyQ': function() { cam.add_roll( -ROTATION_SPEED_PER_FRAME ); },
+    // 'KeyE': function() { cam.add_roll( ROTATION_SPEED_PER_FRAME ); },
+    'ArrowLeft': function() { barrel_rotation += 3; console.log("left"); },
+    'ArrowRight': function() { barrel_rotation += -3; },
+    // 'ArrowUp': function() { cam.add_pitch( -ROTATION_SPEED_PER_FRAME ); },
+    // 'ArrowDown': function() { cam.add_pitch( ROTATION_SPEED_PER_FRAME ); },
 };
 
 function update() {
-let keys_down = keys.keys_down_list();
+    let keys_down = keys.keys_down_list();
 
-for( const key of keys_down ) {
-    let bound_function = KEYMAP[ key ];
+    for( const key of keys_down ) {
+       let bound_function = KEYMAP[ key ];
 
-    if( bound_function ) {
-        bound_function();
+       if( bound_function ) {
+           bound_function();
+       }
     }
+
+    return;
 }
 
-return;
-
-/* this is another way of doing the key map. 
-    but make sure you understand how the key binding approach works!
-
-if( keys.is_key_down( 'KeyW' ) ) {
-    cam.move_in_direction( 0, 0, FLY_SPEED_PER_FRAME );
-}
-if( keys.is_key_down( 'KeyS' ) ) {
-    cam.move_in_direction( 0, 0, -FLY_SPEED_PER_FRAME );
-}
-if( keys.is_key_down( 'KeyA' ) ) {
-    cam.move_in_direction( -FLY_SPEED_PER_FRAME, 0, 0 );
-}
-etc ...
-}*/
-}
 requestAnimationFrame( render );
 setInterval( update, DESIRED_MSPT );

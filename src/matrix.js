@@ -224,10 +224,6 @@ class Mat4 {
         return new Vec4( this.data[2], this.data[6], this.data[10], this.data[14] );
     }
 
-    basis_w() {
-        return new Vec4( this.data[3], this.data[7], this.data[11], this.data[15] );
-    }
-
     rc( row, col ) {
         return this.data[ row * 4 + col ]
     }

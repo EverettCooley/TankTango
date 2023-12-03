@@ -218,23 +218,6 @@ function set_uniform_vec3( gl, program, name, x, y, z ) {
 }
 
 /**
- * Sets uniform data for a 3 component vector.
- * @param {WebGLRenderingContext} gl 
- * @param {WebGLProgram} program 
- * @param {string} name 
- */
-function set_uniform_vec4( gl, program, name, x, y, z, w) {
-    // let old_prog = gl.getParameter( gl.CURRENT_PROGRAM );
-    // gl.useProgram( program );
-
-    const loc = gl.getUniformLocation( program, name );
-
-    gl.uniform4f( loc, x, y, z, w);
-
-    // gl.useProgram( old_prog );
-}
-
-/**
  * Set a single float value
  * @param {*} gl 
  * @param {*} program 
