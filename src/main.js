@@ -1,4 +1,6 @@
 let canvas = document.getElementById( 'the-canvas' );
+canvas.width  = window.innerWidth;
+canvas.height = window.innerHeight;
 /** @type {WebGLRenderingContext} */
 let gl = canvas.getContext( 'webgl2' );
 
@@ -173,15 +175,15 @@ let grass_texture =
     new LitMaterial( gl, 'perf-grass2.jpg', gl.LINEAR, 0.2, 0.8, 0.05, 1.0 );
 let scale = 
     new LitMaterial( gl, 'metal_scale.png', gl.LINEAR, 0.25, 1, 2, 4 );
+let blue = 
+    new LitMaterial( gl, 'blue.png', gl.LINEAR, 0.25, 1, 2, 4 );
 
-let sun_dir = ( new Vec4( 1.0, 0.0, -1.0, 0.0 ) ).norm();
-let sun = new Light( sun_dir.x, sun_dir.y, sun_dir.z, 1.0, 0.95, 0.85, 0 );
-let light1 = new Light( -9, -9, 0.0, 1.0, 0.2, 0.2, 1 );
 
 let rock = NormalMesh.uv_sphere( gl, lit_program, 1, 16, rock_texture ); 
 let ground = NormalMesh.box( gl, lit_program, 1, 1, 1, grass_texture );
 let tank_body = NormalMesh.box( gl, lit_program, 1, 1, 1, scale );
 let tank_cockpit = NormalMesh.uv_sphere( gl, lit_program, 1, 16, scale );
+let bullet = NormalMesh.uv_sphere( gl, lit_program, 1, 16, blue );
 
 
 let projection = Mat4.perspective_fovx( 0.125, canvas.width / canvas.height, 0.125, 1024 );
@@ -202,6 +204,17 @@ function set_and_bind(model){
     set_uniform_vec3( gl, current_program, 'viewer_loc', cam.x, cam.y, cam.z );
 
     // bind lights
+
+
+    let light1 = null;
+    let sun_dir = ( new Vec4( sun_cords_x, 0.0, sun_cords_z, 0.0 ) ).norm();
+    let sun = new Light( sun_dir.x, sun_dir.y, sun_dir.z, 1.0, 0.95, 0.85, 0 );
+    if (sun_cords_z>0){
+        light1 = new Light( main_tank_x, main_tank_y, 0.0, 0.2, 0.4, 1.0, 1 );
+    }
+    else{
+        light1 = new Light( main_tank_x, main_tank_y, 0.0, 0.0, 0.0, 0.0, 1 );
+    }
     sun.bind( gl, current_program, modelview );
     light1.bind( gl, current_program, modelview );
 
@@ -218,6 +231,18 @@ function render_sphere(x, y, size_x, size_y, roation_turns){
     let model = translation_matrix.mul(rotation_matrix.mul(scale_matrix));
     set_and_bind(model);
     rock.render( gl );
+}
+
+const BULLET_SCALE_Z = 1;
+const BULLET_TRANSLATION_Z = -0.5;
+const BULLET_SIZE = .025;
+function render_bullet(x, y){
+    let scale_matrix = Mat4.scale(BULLET_SIZE, BULLET_SIZE, BULLET_SIZE);
+    let rotation_matrix = Mat4.rotation_xy(0.0);
+    let translation_matrix = Mat4.translation(x, y, BULLET_TRANSLATION_Z );
+    let model = translation_matrix.mul(rotation_matrix.mul(scale_matrix));
+    set_and_bind(model);
+    bullet.render( gl );
 }
 
 const GROUND_SCALE_XY = 10; // x, y
@@ -296,17 +321,21 @@ function rotatePoint(x, y, originX, originY, angle) {
 }
 
 
-let main_tank_x = 0;
-let main_tank_y = 0;
-let barrel_rotation = 0;
-const MAX_ROCKS = 3;
-const MAX_Y_VALUE = 1;
-const MAX_x_VALUE = 4;
+
 
 function get_random_number_between(multipler){
     return (Math.random() * 2 - 1).toFixed(4) * multipler;
 }
 
+function is_not_stail_rock(cur_x, cur_y, rock_x, rock_y, distance_threshold){
+    if (Math.abs(cur_x-rock_x) > distance_threshold){
+        return false;
+    }
+    if (Math.abs(cur_y-rock_y) > distance_threshold){
+        return false;
+    }
+    return true;
+}
 
 
 function check_quadrant(pos){
@@ -317,7 +346,6 @@ function check_quadrant(pos){
 }
 
 
-bullets = []
 let rocks = [];
 for(let i = 0; i<10; i++){
     rocks.push({x : get_random_number_between(10), 
@@ -327,12 +355,29 @@ for(let i = 0; i<10; i++){
                 rotation : get_random_number_between(1)+360
                 });
 }
-console.log(rocks);
-let counter = 0;
+
+let main_tank_x = 0;
+let main_tank_y = 0;
+let barrel_rotation = 0;
+const MAX_ROCKS = 3;
+const MAX_Y_VALUE = 1;
+const MAX_x_VALUE = 4;
+
+let tme_counter = 0;
+let bullets = [];
+let barrel_point = null;
+
+let sun_cords_x = 1
+let sun_cords_z = -1
+
 let mid_y = 0;
 let mid_x = 0;
+
 let last_mid_x = 0;
 let last_mid_y = 0;
+
+
+
 
 const NUMBER_OF_ROCKS_TO_ADD = 5;
 function add_rocks_in_y(x, y){
@@ -382,16 +427,16 @@ function render( now ) {
 
     main_tank_x = cam.x;
     main_tank_y = cam.y;
-    if (barrel_rotation >= 360){
-        barrel_rotation = 0;
-    }
 
     render_tank_body(main_tank_x, main_tank_y);
     render_tank_cockpit(main_tank_x, main_tank_y);
 
-    var point = rotatePoint(main_tank_x, main_tank_y+(BARREL_SCALE_Y/2), main_tank_x, main_tank_y, barrel_rotation);
+    barrel_point = rotatePoint(main_tank_x, main_tank_y+(BARREL_SCALE_Y/2), main_tank_x, main_tank_y, barrel_rotation);
+    redner_tank_barrel( main_tank_x + (barrel_point.x - main_tank_x), main_tank_y + (barrel_point.y - main_tank_y), barrel_rotation);
 
-    redner_tank_barrel( main_tank_x + (point.x - main_tank_x), main_tank_y + (point.y - main_tank_y), barrel_rotation);
+    for(let i=0; i<bullets.length; i++){
+        render_bullet(bullets[i].x, bullets[i].y);
+    }
 }
 
 const KEYMAP = {
@@ -411,16 +456,54 @@ const KEYMAP = {
     // 'ArrowDown': function() { cam.add_pitch( ROTATION_SPEED_PER_FRAME ); },
 };
 
+const BULLET_SPEED = .01; // smaller slower
+const RATE_OF_FIRE = 50; // lower faster
+const BULLETS_LIMIT = 10;
 function update() {
     let keys_down = keys.keys_down_list();
+
+    if (barrel_rotation >= 360){
+        barrel_rotation = 0;
+    }
+
+    if(bullets.length> BULLETS_LIMIT){
+        bullets.shift();
+    }
+
+
+    for(let i=0; i<bullets.length; i++){
+        bullets[i].x += bullets[i].norm_vec.x * BULLET_SPEED;
+        bullets[i].y += bullets[i].norm_vec.y * BULLET_SPEED;
+    }
+
+    tme_counter++;
+    if(tme_counter == 50){
+        tme_counter = 0;
+        barrel_point = rotatePoint(main_tank_x, main_tank_y+(BARREL_SCALE_Y/2), main_tank_x, main_tank_y, barrel_rotation);
+        barrel_norm = new Vec4(barrel_point.x - main_tank_x, barrel_point.y - main_tank_y, 0).norm();
+        bullets.push({x : main_tank_x + (barrel_norm.x * BARREL_SCALE_Y),
+                      y : main_tank_y + (barrel_norm.y * BARREL_SCALE_Y),
+                    norm_vec : barrel_norm})
+        console.log(bullets);
+    }
+
+
+    const SUN_SPEED = .1;
+    let cur_sun_pos = rotatePoint(sun_cords_x, sun_cords_z, 0, 0, SUN_SPEED);
+    sun_cords_x = cur_sun_pos.x;
+    sun_cords_z = cur_sun_pos.y;
+    console.log(sun_cords_x, sun_cords_x);
+
 
     mid_y = check_quadrant(main_tank_y) * 10;
     mid_x = check_quadrant(main_tank_x) * 10;
     if(mid_x != last_mid_x){
+        rocks = rocks.filter(is_not_stail_rock);
         add_rocks_in_x(mid_x+10, mid_y+10);
         last_mid_x = mid_x;
     }
     if(mid_y != last_mid_y){
+        rocks = rocks.filter(is_not_stail_rock);
         add_rocks_in_y(mid_x+10, mid_y+10);
         last_mid_y = mid_y;
     }
@@ -432,7 +515,6 @@ function update() {
            bound_function();
        }
     }
-
     return;
 }
 
