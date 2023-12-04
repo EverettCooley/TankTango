@@ -170,7 +170,7 @@ cam.translate( 0, 0, -10 );
 let rock_texture = 
     new LitMaterial( gl, 'rock.jpg', gl.LINEAR, 0.25, 1, 2, 5 );
 let grass_texture = 
-    new LitMaterial( gl, 'perf-grass.jpg', gl.LINEAR, 0.2, 0.8, 0.05, 1.0 );
+    new LitMaterial( gl, 'perf-grass2.jpg', gl.LINEAR, 0.2, 0.8, 0.05, 1.0 );
 let scale = 
     new LitMaterial( gl, 'metal_scale.png', gl.LINEAR, 0.25, 1, 2, 4 );
 
