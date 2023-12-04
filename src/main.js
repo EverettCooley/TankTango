@@ -159,7 +159,7 @@ const DESIRED_MSPT = 1000.0 / DESIRED_TICK_RATE;
 const ROTATION_SPEED = 0.2; // eighth turn per second
 const ROTATION_SPEED_PER_FRAME = ROTATION_SPEED / DESIRED_TICK_RATE;
 
-const FLY_SPEED = 2.5;    // units per second
+const FLY_SPEED = 1.5;    // units per second
 const FLY_SPEED_PER_FRAME = FLY_SPEED / DESIRED_TICK_RATE;
 
 let keys = Keys.start_listening();
@@ -170,17 +170,18 @@ cam.translate( 0, 0, -10 );
 let rock_texture = 
     new LitMaterial( gl, 'rock.jpg', gl.LINEAR, 0.25, 1, 2, 5 );
 let grass_texture = 
-    new LitMaterial( gl, 'grass.png', gl.LINEAR, 0.2, 0.8, 0.05, 1.0 );
+    new LitMaterial( gl, 'perf-grass.jpg', gl.LINEAR, 0.2, 0.8, 0.05, 1.0 );
 let scale = 
     new LitMaterial( gl, 'metal_scale.png', gl.LINEAR, 0.25, 1, 2, 4 );
 
-let sun_dir = ( new Vec4( 0.0, 0.0, -1.0, 0.0 ) ).norm();
+let sun_dir = ( new Vec4( 1.0, 0.0, -1.0, 0.0 ) ).norm();
 let sun = new Light( sun_dir.x, sun_dir.y, sun_dir.z, 1.0, 0.95, 0.85, 0 );
 let light1 = new Light( -9, -9, 0.0, 1.0, 0.2, 0.2, 1 );
 
 let rock = NormalMesh.uv_sphere( gl, lit_program, 1, 16, rock_texture ); 
 let ground = NormalMesh.box( gl, lit_program, 1, 1, 1, grass_texture );
 let tank_body = NormalMesh.box( gl, lit_program, 1, 1, 1, scale );
+let tank_cockpit = NormalMesh.uv_sphere( gl, lit_program, 1, 16, scale );
 
 
 let projection = Mat4.perspective_fovx( 0.125, canvas.width / canvas.height, 0.125, 1024 );
@@ -219,7 +220,7 @@ function render_sphere(x, y, size_x, size_y, roation_turns){
     rock.render( gl );
 }
 
-const GROUND_SCALE_XY = 2; // x, y
+const GROUND_SCALE_XY = 10; // x, y
 const GROUND_SCALE_Z = 1; // z
 const GROUND_TRANSLATION_Z = 0;
 function render_ground(x, y){
@@ -232,7 +233,7 @@ function render_ground(x, y){
 }
 
 const TANK_SCALE_X = .2;
-const TNAK_SCALE_Y = .25;
+const TNAK_SCALE_Y = .35;
 const TANK_SCALE_Z = 1;
 const TANK_TRANSLATION_Z = -.12;
 function render_tank_body(x, y){
@@ -242,6 +243,19 @@ function render_tank_body(x, y){
     let model = translation_matrix.mul(rotation_matrix.mul(scale_matrix));
     set_and_bind(model);
     tank_body.render( gl );
+}
+
+const COCKPIT_SCALE_X = .075;
+const COCKPIT_SCALE_Y = .075;
+const COCKPIT_SCALE_Z = 1;
+const COCKPIT_TRANSLATION_Z = -.12;
+function render_tank_cockpit(x, y){
+    let scale_matrix = Mat4.scale(COCKPIT_SCALE_X, COCKPIT_SCALE_Y, COCKPIT_SCALE_Z);
+    let rotation_matrix = Mat4.rotation_xy(0.0);
+    let translation_matrix = Mat4.translation(x, y, COCKPIT_TRANSLATION_Z );
+    let model = translation_matrix.mul(rotation_matrix.mul(scale_matrix));
+    set_and_bind(model);
+    tank_cockpit.render( gl );
 }
 
 const BARREL_SCALE_X = .05;
@@ -285,6 +299,63 @@ function rotatePoint(x, y, originX, originY, angle) {
 let main_tank_x = 0;
 let main_tank_y = 0;
 let barrel_rotation = 0;
+const MAX_ROCKS = 3;
+const MAX_Y_VALUE = 1;
+const MAX_x_VALUE = 4;
+
+function get_random_number_between(multipler){
+    return (Math.random() * 2 - 1).toFixed(4) * multipler;
+}
+
+
+
+function check_quadrant(pos){
+    if(pos<5 && pos>-5){
+        return 0;
+    }
+    return Math.ceil((pos-5)/10)
+}
+
+
+bullets = []
+let rocks = [];
+for(let i = 0; i<10; i++){
+    rocks.push({x : get_random_number_between(10), 
+                y : get_random_number_between(10),
+                size_x : get_random_number_between(.5)+1,
+                size_y : get_random_number_between(.5)+1,
+                rotation : get_random_number_between(1)+360
+                });
+}
+console.log(rocks);
+let counter = 0;
+let mid_y = 0;
+let mid_x = 0;
+let last_mid_x = 0;
+let last_mid_y = 0;
+
+const NUMBER_OF_ROCKS_TO_ADD = 5;
+function add_rocks_in_y(x, y){
+    for(let i=0; i<NUMBER_OF_ROCKS_TO_ADD; i++){
+        rocks.push({x : get_random_number_between(15)+x, 
+                    y : get_random_number_between(5)+y,
+                    size_x : get_random_number_between(.5)+1,
+                    size_y : get_random_number_between(.5)+1,
+                    rotation : get_random_number_between(1)+360
+                    });
+    }
+}
+
+function add_rocks_in_x(x, y){
+    for(let i=0; i<NUMBER_OF_ROCKS_TO_ADD; i++){
+        rocks.push({x : get_random_number_between(5)+x, 
+                    y : get_random_number_between(15)+y,
+                    size_x : get_random_number_between(.5)+1,
+                    size_y : get_random_number_between(.5)+1,
+                    rotation : get_random_number_between(1)+360
+                    });
+    }
+}
 
 function render( now ) {
     last_update = now;
@@ -293,26 +364,32 @@ function render( now ) {
     
     gl.clear( gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT );
 
-    render_sphere(1, 1, 1, 1, 0.0);
-    render_sphere(-1, -1, 2, 1, 0.0);
-    render_ground(0, 0);
-    render_ground(2, 0);
-    render_ground(-2, 0);
-    render_ground(0, 2);
-    render_ground(-2, 2);
-    render_ground(2, 2);
-    render_ground(0, -2);
-    render_ground(-2, -2);
-    render_ground(2, -2);
+    render_ground(mid_x, mid_y);
+    render_ground(mid_x+10, mid_y);
+    render_ground(mid_x-10, mid_y);
+
+    render_ground(mid_x, mid_y+10);
+    render_ground(mid_x+10, mid_y+10);
+    render_ground(mid_x-10, mid_y+10);
+
+    render_ground(mid_x, mid_y-10);
+    render_ground(mid_x+10, mid_y-10);
+    render_ground(mid_x-10, mid_y-10);
+
+    for(let i=0; i<rocks.length; i++){
+        render_sphere(rocks[i].x, rocks[i].y, rocks[i].size_x, rocks[i].size_y, rocks[i].rotation);
+    }
+
     main_tank_x = cam.x;
     main_tank_y = cam.y;
     if (barrel_rotation >= 360){
         barrel_rotation = 0;
     }
+
     render_tank_body(main_tank_x, main_tank_y);
+    render_tank_cockpit(main_tank_x, main_tank_y);
 
     var point = rotatePoint(main_tank_x, main_tank_y+(BARREL_SCALE_Y/2), main_tank_x, main_tank_y, barrel_rotation);
-    console.log(point.x, point.y);
 
     redner_tank_barrel( main_tank_x + (point.x - main_tank_x), main_tank_y + (point.y - main_tank_y), barrel_rotation);
 }
@@ -328,7 +405,7 @@ const KEYMAP = {
     // 'KeyC': function() { cam.translate( 0, -FLY_SPEED_PER_FRAME, 0 ); },
     // 'KeyQ': function() { cam.add_roll( -ROTATION_SPEED_PER_FRAME ); },
     // 'KeyE': function() { cam.add_roll( ROTATION_SPEED_PER_FRAME ); },
-    'ArrowLeft': function() { barrel_rotation += 3; console.log("left"); },
+    'ArrowLeft': function() { barrel_rotation += 3; },
     'ArrowRight': function() { barrel_rotation += -3; },
     // 'ArrowUp': function() { cam.add_pitch( -ROTATION_SPEED_PER_FRAME ); },
     // 'ArrowDown': function() { cam.add_pitch( ROTATION_SPEED_PER_FRAME ); },
@@ -337,6 +414,17 @@ const KEYMAP = {
 function update() {
     let keys_down = keys.keys_down_list();
 
+    mid_y = check_quadrant(main_tank_y) * 10;
+    mid_x = check_quadrant(main_tank_x) * 10;
+    if(mid_x != last_mid_x){
+        add_rocks_in_x(mid_x+10, mid_y+10);
+        last_mid_x = mid_x;
+    }
+    if(mid_y != last_mid_y){
+        add_rocks_in_y(mid_x+10, mid_y+10);
+        last_mid_y = mid_y;
+    }
+    
     for( const key of keys_down ) {
        let bound_function = KEYMAP[ key ];
 
