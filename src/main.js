@@ -387,7 +387,7 @@ let tme_counter = 0;
 let bullets = [];
 let barrel_point = null;
 
-let sun_cords_x = 1
+let sun_cords_x = -1
 let sun_cords_z = -1
 
 let mid_y = 0;
@@ -486,7 +486,7 @@ function render( now ) {
 
 }
 
-let SUN_SPEED = .001;
+let SUN_SPEED = .1;
 
 const KEYMAP = {
     // 'KeyW': function() { cam.move_in_direction( 0, 0, FLY_SPEED_PER_FRAME ); },
@@ -495,7 +495,7 @@ const KEYMAP = {
     'KeyD': function() { cam.move_in_direction( FLY_SPEED_PER_FRAME, 0, 0 ); },
     'KeyW': function() { cam.translate( 0, FLY_SPEED_PER_FRAME, 0 ); },
     'KeyS': function() { cam.translate( 0, -FLY_SPEED_PER_FRAME, 0 ); },
-    'KeyQ': function() { SUN_SPEED = .1},
+    'KeyQ': function() { SUN_SPEED = .01},
     // 'KeyC': function() { cam.translate( 0, -FLY_SPEED_PER_FRAME, 0 ); },
     // 'KeyQ': function() { cam.add_roll( -ROTATION_SPEED_PER_FRAME ); },
     // 'KeyE': function() { cam.add_roll( ROTATION_SPEED_PER_FRAME ); },
@@ -573,6 +573,7 @@ function update() {
         add_enemies_in_x(mid_x+10, mid_y+10);
         last_mid_x = mid_x;
     }
+
     if(mid_y != last_mid_y){
         rocks = rocks.filter(rock => is_not_stail_asset(main_tank_x, main_tank_y, rock.x, rock.y, 15));
         enemies = enemies.filter(enemy => is_not_stail_asset(main_tank_x, main_tank_y, enemy.x, enemy.y, 15));
